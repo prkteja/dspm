@@ -4,8 +4,8 @@ mod constants;
 mod init;
 mod args;
 
+use std::process;
 use clap::Parser;
-use std::path::PathBuf;
 use dirs;
 
 
@@ -24,20 +24,29 @@ fn main() {
         },
         args::Commands::List { domain } => {
             let db_parser = db::dbParser::DBParser::new(pwdstore, false);
-            match domain {
-                None => {
-                    let domain_list = db_parser.unwrap().list_domains();
-                    for d in domain_list {
-                        println!("{}", d);
-                    }
+            match db_parser {
+                Err(e) => {
+                    eprintln!("Unable to parse pwdstore, file may be missing or corrupt");
+                    eprintln!("{}", e);
+                    process::exit(1);
                 },
-                Some(d) => {
-                    let account_list = db_parser.unwrap().list_accounts(d.to_owned());
-                    match account_list {
-                        None => (),
-                        Some(list) => {
-                            for a in list {
-                                println!("{}", a);
+                Ok(parser) => {
+                    match domain {
+                        None => {
+                            let domain_list = parser.list_domains();
+                            for d in domain_list {
+                                println!("{}", d);
+                            }
+                        },
+                        Some(d) => {
+                            let account_list = parser.list_accounts(d.to_owned());
+                            match account_list {
+                                None => (),
+                                Some(list) => {
+                                    for a in list {
+                                        println!("{}", a);
+                                    }
+                                }
                             }
                         }
                     }
@@ -46,21 +55,66 @@ fn main() {
         },
         args::Commands::Add(args::AddArgs { domain, username }) => {
             let db_parser = db::dbParser::DBParser::new(pwdstore, false);
-            let password = crypt::get_passphrase(true, false).unwrap();
-            match db_parser.unwrap().add_password(domain.to_owned(), username.to_owned(), password) {
-                Ok(_) => {
-                    println!("added password successfully");
-                },
+            match db_parser {
                 Err(e) => {
-                    eprintln!("unable to add password");
+                    eprintln!("Unable to parse pwdstore, file may be missing or corrupt");
                     eprintln!("{}", e);
+                    process::exit(1);
+                },
+                Ok(mut parser) => {
+                    let password = crypt::get_passphrase(true, false).unwrap();
+                    match parser.add_password(domain.to_owned(), username.to_owned(), password) {
+                        Ok(_) => {
+                            println!("Added password successfully");
+                        },
+                        Err(e) => {
+                            eprintln!("Unable to add password");
+                            eprintln!("{}", e);
+                            process::exit(1);
+                        }
+                    }
                 }
             }
         },
         args::Commands::Show(args::AddArgs { domain, username }) => {
-            let db_parser = db::dbParser::DBParser::new(pwdstore, false).unwrap();
-            let password = db_parser.get_password(domain.to_owned(), username.to_owned()).unwrap(); 
-            println!("{}", String::from_utf8(password.unwrap()).unwrap());
+            let db_parser = db::dbParser::DBParser::new(pwdstore, false);
+            match db_parser {
+                Err(e) => {
+                    eprintln!("Unable to parse pwdstore, file may be missing or corrupt");
+                    eprintln!("{}", e);
+                    process::exit(1);
+                },
+                Ok(parser) => {
+                    let password = parser.get_password(domain.to_owned(), username.to_owned()); 
+                    match password {
+                        Err(e) => {
+                            eprintln!("Unable to decrypt password");
+                            eprintln!("{}", e);
+                            process::exit(1);
+                        },
+                        Ok(pwd) => {
+                            match pwd {
+                                None => {
+                                    eprintln!("No password found");
+                                    process::exit(1);
+                                },
+                                Some(p) => {
+                                    match String::from_utf8(p) {
+                                        Err(e) => {
+                                            eprintln!("Invalid utf8 sequence found in password");
+                                            eprintln!("{}", e);
+                                            process::exit(1);
+                                        },
+                                        Ok(s) => {
+                                            println!("{}", s);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
